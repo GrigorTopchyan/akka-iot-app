@@ -83,6 +83,14 @@ public class Device extends AbstractActor {
     public Receive createReceive() {
         return receiveBuilder()
                 .match(
+                        DeviceManager.RequrstTrackDevice.class,
+                        r -> {
+                            if(this.groupId.equals(r.groupId) && this.deviceId.equals(r.deviceId)){
+                                getSender().tell(new DeviceManager.DeviceRegistered(),getSelf());
+                            }
+                        }
+                )
+                .match(
                         ReadTemperature.class, r -> {
                             getSender().tell(new RespondTemperature(r.requestId, lastTemperatureReading), getSelf());
                         })
