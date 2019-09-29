@@ -3,6 +3,7 @@ package edu.training.akka.iot;
 import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 import akka.actor.Props;
+import akka.actor.Terminated;
 import akka.event.Logging;
 import akka.event.LoggingAdapter;
 
@@ -44,8 +45,35 @@ public class DeviceManager extends AbstractActor {
         log.info("DeveceManager stopped");
     }
 
+
+    private void onTrackDevice(RequrstTrackDevice trackMsg){
+        ActorRef deviceGroup = groupIdToActor.get(trackMsg.groupId);
+        if (deviceGroup != null){
+            deviceGroup.forward(trackMsg,getContext());
+        }else {
+            log.info("Creating device group for {} ",trackMsg.groupId);
+            ActorRef actorGroup = getContext().actorOf(DeviceGroup.props(trackMsg.groupId),"group-"+ trackMsg.groupId);
+            getContext().watch(actorGroup);
+            actorGroup.forward(trackMsg,getContext());
+            groupIdToActor.put(trackMsg.groupId,actorGroup);
+            actorToGroupId.put(actorGroup,trackMsg.groupId);
+        }
+    }
+
+
+    private void onTerminated(Terminated t){
+        ActorRef actorGroup = t.actor();
+        String groupId = actorToGroupId.get(actorGroup);
+        log.info("Actor group for {} has been terminateed ", groupId);
+        groupIdToActor.remove(groupId);
+        actorToGroupId.remove(actorGroup);
+    }
+
     @Override
     public Receive createReceive() {
-        return null;
+        return receiveBuilder()
+                .match(RequrstTrackDevice.class, this::onTrackDevice)
+                .match(Terminated.class,this::onTerminated)
+                .build();
     }
 }
