@@ -6,10 +6,12 @@ import akka.actor.Props;
 import akka.actor.Terminated;
 import akka.event.Logging;
 import akka.event.LoggingAdapter;
+import scala.concurrent.duration.FiniteDuration;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Created by grigort on 9/26/2019.
@@ -29,7 +31,6 @@ public class DeviceGroup extends AbstractActor {
 
     final Map<String, ActorRef> deviceIdToActor = new HashMap<>();
     final Map<ActorRef, String> actorToDeviceId = new HashMap<>();
-
 
     public static final class RequestDeviceList {
         private final long requestId;
@@ -51,6 +52,66 @@ public class DeviceGroup extends AbstractActor {
 
     }
 
+    public static final class RequestAllTrmperatures{
+        final long requestId;
+
+
+        public RequestAllTrmperatures(long requestId) {
+            this.requestId = requestId;
+        }
+    }
+
+    public static final class RespondAllTemperatures{
+        final long requestId;
+        final Map<String,TemperatureReading> temperatures;
+
+        public RespondAllTemperatures(long requestId, Map<String, TemperatureReading> temperatures) {
+            this.requestId = requestId;
+            this.temperatures = temperatures;
+        }
+    }
+
+    public static interface TemperatureReading {}
+
+    public static final class Temperature implements TemperatureReading{
+        public final double value;
+
+        public Temperature(double value) {
+            this.value = value;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (obj == null || obj.getClass() != this.getClass()) return false;
+            Temperature that = (Temperature)obj;
+            return Double.compare(that.value,this.value) == 0;
+        }
+
+        @Override
+        public int hashCode() {
+            long temp = Double.doubleToLongBits(this.value);
+            return (int)(temp ^(temp >>> 32));
+        }
+
+        @Override
+        public String toString() {
+            return "Temperature{" + "value=" + value + '}';
+        }
+    }
+
+    public enum TemperatureNotAvailable implements TemperatureReading{
+        INSTANCE
+    }
+
+    public enum DeviceNotAvailable implements TemperatureReading{
+        INSTANCE
+    }
+
+    public enum DeviceTimedOut implements TemperatureReading{
+        INSTANCE
+    }
+
     @Override
     public void preStart() throws Exception {
         log.info("DeveceGroup {} started", groupId);
@@ -64,7 +125,6 @@ public class DeviceGroup extends AbstractActor {
     private void onDeviceList(RequestDeviceList r) {
         getSender().tell(new ReplyDeviceList(r.requestId, deviceIdToActor.keySet()), getSelf());
     }
-
 
     private void onTrackDevice(DeviceManager.RequrstTrackDevice trackMsg) {
         if (this.groupId.equals(trackMsg.groupId)) {
@@ -84,6 +144,11 @@ public class DeviceGroup extends AbstractActor {
         }
     }
 
+    private void onAllTemperatures(RequestAllTrmperatures r){
+        Map<ActorRef,String> actorToDeviceIdCopy = new HashMap<>(this.actorToDeviceId);
+        getContext().actorOf(DeviceGroupQuery.props(actorToDeviceIdCopy,r.requestId,getSender(),new FiniteDuration(3,TimeUnit.SECONDS)));
+    }
+
     private void onTerminated(Terminated t) {
         ActorRef deviceActor = t.actor();
         String deviceId = actorToDeviceId.get(deviceActor);
@@ -99,6 +164,7 @@ public class DeviceGroup extends AbstractActor {
                 .match(DeviceManager.RequrstTrackDevice.class, this::onTrackDevice)
                 .match(Terminated.class, this::onTerminated)
                 .match(RequestDeviceList.class, this::onDeviceList)
+                .match(RequestAllTrmperatures.class,this::onAllTemperatures)
                 .build();
     }
 }
